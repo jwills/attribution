@@ -25,22 +25,27 @@ import org.apache.crunch.PTable;
 import org.apache.crunch.Pair;
 import org.apache.crunch.Tuple;
 import org.apache.crunch.Tuple3;
+import org.apache.crunch.Target.WriteMode;
 import org.apache.crunch.util.CrunchTool;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.util.ToolRunner;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 
 public class MultiTouchAttributionModel extends CrunchTool {
 
-  @Parameter(names = "--touches-path", required=true)
-  private String touchesPath;
+  @Parameter(names = "--user-channels-path", required=true,
+      description = "HDFS path to the CSV file of <UserID,ChannelID> values.")
+  private String userChannelsPath;
   
-  @Parameter(names = "--touches-path", required=true)
-  private String eventsPath;
+  @Parameter(names = "--positive-users-path", required=true,
+      description = "HDFS path to the file containing UserIDs that had a positive outcome.")
+  private String positiveUsersPath;
   
-  @Parameter(names = "--output-path", required=true)
+  @Parameter(names = "--output-path", required=true,
+      description = "HDFS path to write the <UserID,ChannelID,Score> CSV data to. Overwrites existing outputs.")
   private String outputPath;
   
   public MultiTouchAttributionModel(boolean inMemory) {
@@ -51,25 +56,37 @@ public class MultiTouchAttributionModel extends CrunchTool {
   @SuppressWarnings("static-access")
   public int run(String[] args) throws Exception {
     JCommander jc = new JCommander(this);
-    jc.parse(args);
-    PCollection<String> out = exec(read(from.textFile(touchesPath)),
-        read(from.textFile(eventsPath)));
-    write(out, to.textFile(outputPath));
+    if (args.length == 0 || (args.length == 1 && args[0].contains("help"))) {
+      jc.usage();
+      return 0;
+    }
+    
+    try {
+      jc.parse(args);
+    } catch (ParameterException e) {
+      System.err.println(e.getMessage());
+      return 1;
+    }
+    
+    PCollection<String> out = exec(read(from.textFile(userChannelsPath)),
+        read(from.textFile(positiveUsersPath)));
+    out.write(to.textFile(outputPath), WriteMode.OVERWRITE);
+    
     done();
     return 0;
   }
   
   public PCollection<String> exec(
       PCollection<String> touches,
-      PCollection<String> events) throws Exception {
+      PCollection<String> positives) throws Exception {
     
     PTable<String, String> touchesTbl = touches
         .parallelDo(new SplitLineFn(), tableOf(strings(), strings()));
     
-    PTable<String, Boolean> eventsTbl = events
+    PTable<String, Boolean> positivesTbl = positives
         .parallelDo(new AsTableFn(), tableOf(strings(), booleans()));
     
-    PTable<String, Pair<Boolean, Collection<String>>> cogrouped = eventsTbl.cogroup(touchesTbl)
+    PTable<String, Pair<Boolean, Collection<String>>> cogrouped = positivesTbl.cogroup(touchesTbl)
         .parallelDo(new SessionsFn(), tableOf(strings(), pairs(booleans(), collections(strings()))));
     cogrouped.materialize();
     

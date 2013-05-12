@@ -17,6 +17,9 @@
     <javassist.version>3.16.1-GA</javassist.version>
     <junit.version>4.8.2</junit.version>
     <jcommander.version>1.30</jcommander.version>
+
+    <compiler.plugin.version>2.3.2</compiler.plugin.version>
+    <dependency.plugin.version>2.6</dependency.plugin.version>
   </properties>
 
   <dependencies>
@@ -97,27 +100,30 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>2.3.2</version>
+        <version>${compiler.plugin.version}</version>
         <configuration>
           <source>1.6</source>
           <target>1.6</target>
         </configuration>
       </plugin>
-      <plugin>
-        <artifactId>maven-assembly-plugin</artifactId>
-        <version>2.2.1</version>
-        <configuration>
-          <descriptorRefs>
-            <descriptorRef>jar-with-dependencies</descriptorRef>
-          </descriptorRefs>
-        </configuration>
+       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>${dependency.plugin.version}</version>
         <executions>
           <execution>
-            <id>make-assembly</id> <!-- this is used for inheritance merges -->
-            <phase>package</phase> <!-- bind to the packaging phase -->
+            <phase>install</phase>
             <goals>
-              <goal>single</goal>
+              <goal>copy-dependencies</goal>
             </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <overWriteReleases>false</overWriteReleases>
+              <overWriteSnapshots>false</overWriteSnapshots>
+              <overWriteIfNewer>true</overWriteIfNewer>
+              <excludeScope>provided</excludeScope>
+              <excludeTransitive>true</excludeTransitive>
+            </configuration>
           </execution>
         </executions>
       </plugin>
