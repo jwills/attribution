@@ -43,6 +43,9 @@ public class MultiTouchAttributionModelTest {
         Avros.strings(), "a", "e", "f");
     
     MultiTouchAttributionModel model = new MultiTouchAttributionModel(true);
-    model.exec(touches, events);
+    PCollection<String> out = model.exec(touches, events);
+    for (String row : out.materialize()) {
+      System.out.println(row);
+    }
   }
 }

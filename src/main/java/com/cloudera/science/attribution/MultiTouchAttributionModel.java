@@ -23,6 +23,7 @@ import org.apache.crunch.MapFn;
 import org.apache.crunch.PCollection;
 import org.apache.crunch.PTable;
 import org.apache.crunch.Pair;
+import org.apache.crunch.Tuple;
 import org.apache.crunch.Tuple3;
 import org.apache.crunch.util.CrunchTool;
 import org.apache.hadoop.conf.Configuration;
@@ -39,6 +40,9 @@ public class MultiTouchAttributionModel extends CrunchTool {
   @Parameter(names = "--touches-path", required=true)
   private String eventsPath;
   
+  @Parameter(names = "--output-path", required=true)
+  private String outputPath;
+  
   public MultiTouchAttributionModel(boolean inMemory) {
     super(inMemory);
   }
@@ -48,10 +52,16 @@ public class MultiTouchAttributionModel extends CrunchTool {
   public int run(String[] args) throws Exception {
     JCommander jc = new JCommander(this);
     jc.parse(args);
-    return exec(read(from.textFile(touchesPath)), read(from.textFile(eventsPath)));
+    PCollection<String> out = exec(read(from.textFile(touchesPath)),
+        read(from.textFile(eventsPath)));
+    write(out, to.textFile(outputPath));
+    done();
+    return 0;
   }
   
-  public int exec(PCollection<String> touches, PCollection<String> events) throws Exception {
+  public PCollection<String> exec(
+      PCollection<String> touches,
+      PCollection<String> events) throws Exception {
     
     PTable<String, String> touchesTbl = touches
         .parallelDo(new SplitLineFn(), tableOf(strings(), strings()));
@@ -78,14 +88,20 @@ public class MultiTouchAttributionModel extends CrunchTool {
         .groupByKey()
         .parallelDo(new ScoreFn(), triples(strings(), strings(), doubles()));
     
-    for (Tuple3<String, String, Double> s : scores.materialize()) {
-      System.out.println(s);
-    }
-    
-    done();
-    return 0;
+    return scores.parallelDo(new StringifyFn<Tuple3<String, String, Double>>(), strings());
   }
 
+  static class StringifyFn<T extends Tuple> extends MapFn<T, String> {
+    @Override
+    public String map(T t) {
+      StringBuilder sb = new StringBuilder().append(t.get(0));
+      for (int i = 1; i < t.size(); i++) {
+        sb.append(',').append(t.get(i));
+      }
+      return sb.toString();
+    }
+  }
+  
   static class SplitLineFn extends MapFn<String, Pair<String, String>> {
     @Override
     public Pair<String, String> map(String input) {

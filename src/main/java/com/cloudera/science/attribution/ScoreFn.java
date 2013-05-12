@@ -35,7 +35,6 @@ public class ScoreFn extends
     Map<String, Double> scores = Maps.newHashMap();
     Map<String, Map<String, Double>> pairScores = Maps.newHashMap();
     for (Pair<String, Double> p : in.second()) {
-      System.out.println(p);
       if (p.first().contains(",")) {
         String[] pieces = p.first().split(",");
         
@@ -61,7 +60,6 @@ public class ScoreFn extends
     for (Map.Entry<String, Double> e : scores.entrySet()) {
       double score = e.getValue();
       double scaledSums = 0;
-      System.out.println(e.getKey());
       Map<String, Double> subScores = pairScores.get(e.getKey());
       if (subScores != null) {
         for (Map.Entry<String, Double> f : subScores.entrySet()) {
