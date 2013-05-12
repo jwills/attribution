@@ -1,0 +1,126 @@
+/**
+ * Copyright (c) 2013, Cloudera, Inc. All Rights Reserved.
+ *
+ * Cloudera, Inc. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"). You may not use this file except in
+ * compliance with the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * This software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for
+ * the specific language governing permissions and limitations under the
+ * License.
+ */
+package com.cloudera.science.attribution;
+
+import static org.apache.crunch.fn.Aggregators.*;
+import static org.apache.crunch.types.avro.Avros.*;
+
+import java.util.Collection;
+
+import org.apache.crunch.MapFn;
+import org.apache.crunch.PCollection;
+import org.apache.crunch.PTable;
+import org.apache.crunch.Pair;
+import org.apache.crunch.Tuple3;
+import org.apache.crunch.util.CrunchTool;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.util.ToolRunner;
+
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+
+public class MultiTouchAttributionModel extends CrunchTool {
+
+  @Parameter(names = "--touches-path", required=true)
+  private String touchesPath;
+  
+  @Parameter(names = "--touches-path", required=true)
+  private String eventsPath;
+  
+  public MultiTouchAttributionModel(boolean inMemory) {
+    super(inMemory);
+  }
+  
+  @Override
+  @SuppressWarnings("static-access")
+  public int run(String[] args) throws Exception {
+    JCommander jc = new JCommander(this);
+    jc.parse(args);
+    return exec(read(from.textFile(touchesPath)), read(from.textFile(eventsPath)));
+  }
+  
+  public int exec(PCollection<String> touches, PCollection<String> events) throws Exception {
+    
+    PTable<String, String> touchesTbl = touches
+        .parallelDo(new SplitLineFn(), tableOf(strings(), strings()));
+    
+    PTable<String, Boolean> eventsTbl = events
+        .parallelDo(new AsTableFn(), tableOf(strings(), booleans()));
+    
+    PTable<String, Pair<Boolean, Collection<String>>> cogrouped = eventsTbl.cogroup(touchesTbl)
+        .parallelDo(new SessionsFn(), tableOf(strings(), pairs(booleans(), collections(strings()))));
+    cogrouped.materialize();
+    
+    PTable<String, Double> probs = cogrouped.values()
+        .parallelDo(new TouchesFn(), tableOf(strings(), pairs(longs(), longs())))
+        .groupByKey()
+        .combineValues(pairAggregator(SUM_LONGS(), SUM_LONGS()))
+        .parallelDo(new ValueRatiosFn(), tableOf(strings(), doubles()));
+    probs.materialize();
+    
+    PTable<String, String> inverted = cogrouped.parallelDo(new UserLevelFn(),
+        tableOf(strings(), strings()));
+    
+    PCollection<Tuple3<String, String, Double>> scores = probs.join(inverted)
+        .parallelDo(new ReMapFn(), tableOf(strings(), pairs(strings(), doubles())))
+        .groupByKey()
+        .parallelDo(new ScoreFn(), triples(strings(), strings(), doubles()));
+    
+    for (Tuple3<String, String, Double> s : scores.materialize()) {
+      System.out.println(s);
+    }
+    
+    done();
+    return 0;
+  }
+
+  static class SplitLineFn extends MapFn<String, Pair<String, String>> {
+    @Override
+    public Pair<String, String> map(String input) {
+      String[] pieces = input.split(",");
+      return Pair.of(pieces[0], pieces[1]);
+    }
+  }
+  
+  static class AsTableFn extends MapFn<String, Pair<String, Boolean>> {
+    @Override
+    public Pair<String, Boolean> map(String input) {
+      return Pair.of(input, true);
+    }
+  }
+  
+  static class ValueRatiosFn extends MapFn<Pair<String, Pair<Long, Long>>, Pair<String, Double>> {
+    @Override
+    public Pair<String, Double> map(Pair<String, Pair<Long, Long>> in) {
+      Pair<Long, Long> yesNo = in.second();
+      double ratio = yesNo.first() / (yesNo.first().doubleValue() + yesNo.second().doubleValue());
+      return Pair.of(in.first(), ratio);
+    }
+  }
+  
+  static class ReMapFn extends
+      MapFn<Pair<String, Pair<Double, String>>, Pair<String, Pair<String, Double>>> {
+    @Override
+    public Pair<String, Pair<String, Double>> map(Pair<String, Pair<Double, String>> p) {
+      return Pair.of(p.second().second(), Pair.of(p.first(), p.second().first()));
+    }
+  }
+  
+  public static void main(String[] args) throws Exception {
+    Configuration conf = new Configuration();
+    int rc = ToolRunner.run(conf, new MultiTouchAttributionModel(false), args);
+    System.exit(rc);
+  }
+}
